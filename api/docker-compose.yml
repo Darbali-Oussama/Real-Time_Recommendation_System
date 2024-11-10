@@ -8,6 +8,7 @@ services:
     volumes:
       - ./app:/app/
       - ./scripts:/scripts/
+      - certs:/app/certs
     ports:
       - '8000:8000'
     entrypoint: "/bin/bash /scripts/entrypoint.sh"
@@ -28,6 +29,8 @@ services:
 
 volumes:
   redis_data:
+  certs:
+    external: true
 
 networks:
   # default:

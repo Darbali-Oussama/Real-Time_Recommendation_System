@@ -1,28 +1,14 @@
 from sqlalchemy.orm import Session
 from models import ItemEmbedding
+from config import settings
 from cache import redis_client
+from elastic import es
 import json
 import numpy as np
 
-def get_item_embedding_by_title(db: Session, title: str):
-    return db.query(ItemEmbedding.embedding).filter(ItemEmbedding.title == title).first()
-
-def get_item_embedding_by_title(db: Session, title: str):
+def get_item_embedding_by_title_postgres(db: Session, title: str):
     cache_key = f"embedding:{title}"
     cached_embedding = redis_client.get(cache_key)
-    
-    # if cached_embedding:
-    #     embedding = pickle.loads(cached_embedding)
-    # else:
-    #     result = db.query(ItemEmbedding.embedding).filter(ItemEmbedding.title == title).first()
-    #     if result is None:
-    #         return None
-    #     #embedding = result[0]
-    #     embedding = np.array(result).flatten().tolist()
-    #     redis_client.set(cache_key, pickle.dumps(embedding))
-
-    # return embedding
-
     if cached_embedding:
         # Decode the JSON string back into a Python list
         embedding = json.loads(cached_embedding)
@@ -38,15 +24,7 @@ def get_item_embedding_by_title(db: Session, title: str):
 
     return embedding
 
-# def get_similar_titles(db: Session, embedding, limit=5):
-#     return (
-#         db.query(ItemEmbedding.title)
-#         .order_by(ItemEmbedding.embedding.l2_distance(embedding))
-#         .limit(limit)
-#         .all()
-#     )
-
-def get_similar_titles(db: Session, embedding, limit=5):
+def get_similar_titles_postgres(db: Session, embedding, limit=5):
     # Query the database to find similar titles based on the embedding
     results = (
         db.query(ItemEmbedding.title, ItemEmbedding.embedding)
@@ -57,20 +35,68 @@ def get_similar_titles(db: Session, embedding, limit=5):
 
     # Process each result and only cache if it doesn't already exist in Redis
     similar_items = []
-    for title, item_embedding in results:
+    for title, embedding in results:
         # Prepare the cache key
-        cache_key = f"embedding:{title}"
-
-        # Check if the item is already cached
-        if not redis_client.exists(cache_key):
-            # Format the data as a JSON object to store in Redis
-            data = np.array(item_embedding).flatten().tolist()
-            # Store in Redis
-            redis_client.set(cache_key, json.dumps(data))
-
-        # Append the title to the list of similar items to return
+        cache_embedding_in_redis(title, embedding)
         similar_items.append(title)
 
     return similar_items
 
+def get_embedding_from_elasticsearch(title: str):
+    cache_key = f"embedding:{title}"
+    cached_embedding = redis_client.get(cache_key)
+    if cached_embedding:
+        # Decode the JSON string back into a Python list
+        embedding = json.loads(cached_embedding)
+    else:
+        search_query = {
+            "query": {
+                "match": {
+                    "title": title
+                }
+            }
+        }
+        response = es.search(index=settings.ES_index_name, body=search_query)
+        if response['hits']['hits']:
+            embedding = response['hits']['hits'][0]['_source']['embedding']
+            embedding = np.array(embedding).flatten().tolist()
+            redis_client.set(cache_key, json.dumps(embedding))
 
+    return embedding
+
+def get_similar_titles_elasticsearch(embedding, limit=5):
+    # Query the database to find similar titles based on the embedding
+    similarity_query = {
+        "size": limit,
+        "query": {
+            "script_score": {
+                "query": {"match_all": {}},
+                "script": {
+                    "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                    "params": {
+                        "query_vector": embedding
+                    }
+                }
+            }
+        }
+    }
+
+    response = es.search(index=settings.ES_index_name, body=similarity_query)
+    results = []
+    for hit in response['hits']['hits']:
+        title = hit['_source']['title']
+        embedding = hit['_source']['embedding']
+        
+        # Cache embedding if it is not in Redis
+        cache_embedding_in_redis(title, embedding)
+
+        results.append(title)
+
+    return results
+
+
+def cache_embedding_in_redis(title: str, embedding):
+    cache_key = f"embedding:{title}"
+    if not redis_client.exists(cache_key):
+        embedding = np.array(embedding).flatten().tolist()
+        redis_client.set(cache_key, json.dumps(embedding))
