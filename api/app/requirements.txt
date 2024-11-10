@@ -1,0 +1,9 @@
+fastapi
+sqlalchemy
+pydantic-settings
+psycopg2-binary
+pgvector
+numpy
+redis
+uvicorn
+json

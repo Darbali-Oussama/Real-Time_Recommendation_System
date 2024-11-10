@@ -1,0 +1,36 @@
+version: '3.9'
+services:
+
+  fastapi:
+    image: python:3.11-slim-buster
+    container_name: fastapi
+    hostname: fastapi
+    volumes:
+      - ./app:/app/
+      - ./scripts:/scripts/
+    ports:
+      - '8000:8000'
+    entrypoint: "/bin/bash /scripts/entrypoint.sh"
+    networks:
+      - my-network
+
+  redis:
+    image: redis:8.0-M02-bookworm
+    restart: always
+    ports:
+      #- 6178:6379
+      - 6379:6379
+    volumes:
+      - redis_data:/data
+    entrypoint: redis-server --appendonly yes
+    networks:
+      - my-network
+
+volumes:
+  redis_data:
+
+networks:
+  # default:
+  #   name: redis_network
+  my-network:
+    external: true
