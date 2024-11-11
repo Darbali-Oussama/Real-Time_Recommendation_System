@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from api import router as api_router
-from database import engine
+from postgres.database import engine
 from models import Base
 
 # Create tables if they don't exist
