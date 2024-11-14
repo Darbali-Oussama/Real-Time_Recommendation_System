@@ -6,6 +6,8 @@ from elastic.elastic import es
 import json
 import numpy as np
 
+from kafka import KafkaProducer
+
 def get_item_embedding_by_id_postgres(db: Session, item_id: int):
     cache_key = f"embedding:{item_id}"
     cached_embedding = redis_client.get(cache_key)
@@ -104,3 +106,15 @@ def cache_embedding_in_redis(item_id, embedding):
     if not redis_client.exists(cache_key):
         embedding = np.array(embedding).flatten().tolist()
         redis_client.set(cache_key, json.dumps(embedding))
+
+
+
+producer = KafkaProducer(bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'], value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+
+# def send_request_to_kafka(data: dict):
+#     producer.send("recommendation_requests", value=data.dict())
+#     producer.flush()
+
+def send_request_to_kafka(data):
+    producer.send("recommendation_requests", json.dumps(data).encode('utf-8'))
+    producer.flush()

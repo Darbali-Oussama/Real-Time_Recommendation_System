@@ -1,9 +1,9 @@
 from sqlalchemy.orm import Session
-from repositories import get_item_embedding_by_id_postgres, get_similar_items_postgres, get_embedding_from_elasticsearch, get_similar_titles_elasticsearch
-from spark.kafka_producer import send_request_to_kafka
+from repositories import get_item_embedding_by_id_postgres, get_similar_items_postgres, get_embedding_from_elasticsearch, get_similar_titles_elasticsearch, send_request_to_kafka
 from models import UserRating
 from typing import List
-
+from kafka import KafkaConsumer
+import json
 
 def get_recommendations_postgres(db: Session, item_id: int, limit: int = 5):
     # Get the embedding for the input title
@@ -38,4 +38,18 @@ def recommend_kafka_spark(db: Session, ratings: List[UserRating]):
         "user_id": ratings[0].user_id,
         "ratings": {rating.book: rating.rating for rating in ratings}
     }
-    #send_request_to_kafka(request_data)
+    send_request_to_kafka(request_data)
+
+# Initialize Kafka consumer
+consumer = KafkaConsumer(
+        'recommendation_responses',  # Replace with your Kafka topic name
+        bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'],  # Update with your Kafka server details
+        value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+    )
+
+def get_recommendations(user_id: int):
+    for message in consumer:
+        recommendation_data = message.value
+        if recommendation_data.get("user_id") == user_id:
+            recommendations = recommendation_data.get("recommendations", [])
+            return recommendations

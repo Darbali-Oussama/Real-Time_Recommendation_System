@@ -1,9 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from postgres.database import get_db
-from services import get_recommendations_postgres, get_recommendations_elastic, recommend_kafka_spark
-from models import UserRating, ItemEmbedding
-from typing import List
+from services import get_recommendations_postgres, get_recommendations_elastic, recommend_kafka_spark, get_recommendations
 
 
 router = APIRouter()
@@ -25,9 +23,6 @@ def recommend_books_elasticsearch(title: str):
 
 @router.post("/recommend/spark")
 #async def recommend(ratings: List[UserRating], background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-async def recommend(ratings, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    recommend_kafka_spark(ratings)    
-    # Add a background task to fetch the recommendation response
-    
-    #background_tasks.add_task(get_recommendations, request_data["user_id"])
-    return {"status": "Recommendation request sent successfully"}
+def recommend(ratings):
+    recommend_kafka_spark(ratings)
+    return get_recommendations(ratings[0].user_id)
