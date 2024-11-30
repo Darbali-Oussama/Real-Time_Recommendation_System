@@ -1,13 +1,10 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, array, lit, sum, udf
-from pyspark.sql.types import ArrayType, FloatType
+from pyspark.sql import SparkSession, Row
+from pyspark.sql.functions import col, lit, udf, from_json
+from pyspark.sql.types import StructType, StructField, StringType, FloatType, MapType, IntegerType, ArrayType
 from pyspark.ml.regression import LinearRegression
 from pyspark.ml.feature import VectorAssembler
-from kafka import KafkaConsumer, KafkaProducer
-from functools import partial
-from functools import reduce
+from functools import partial, reduce
 import json
-import ast
 
 # Initialize Spark session
 spark = SparkSession.builder \
@@ -15,65 +12,52 @@ spark = SparkSession.builder \
     .config("spark.jars.packages", "org.postgresql:postgresql:42.2.20,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.3") \
     .getOrCreate()
 
-# Kafka setup
-consumer = KafkaConsumer(
-    'recommendation_requests',
-    bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'],
-    value_deserializer=lambda m: json.loads(m.decode('utf-8'))
-)
-producer = KafkaProducer(
-    bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'],
-    #value_serializer=lambda v: json.dumps(v).encode('utf-8')
-)
+# Kafka configuration
+kafka_bootstrap_servers = "kafka1:19092,kafka2:19093,kafka3:19094"
+input_topic = "recommendation_requests"
+output_topic = "recommendation_responses"
 
-# Convert embedding from string to array
-def parse_embedding(embedding_str):
-    return ast.literal_eval(embedding_str)
-parse_embedding_udf = udf(parse_embedding, ArrayType(FloatType()))
+# Schema for Kafka messages
+kafka_message_schema = StructType([
+    StructField("user_id", IntegerType(), True),
+    StructField("ratings", MapType(StringType(), FloatType()), True)
+])
 
-# Add user ratings as label
-def get_user_rating(id, user_ratings):
-    return user_ratings.get(id, 0.0) 
-#get_user_rating_udf = udf(get_user_rating, FloatType())
-    
 # Load item embeddings from PostgreSQL
-jdbc_url = "jdbc:postgresql://localhost:5432/mydb"
+jdbc_url = "jdbc:postgresql://postgres_db:5432/mydb"
 db_properties = {"user": "admin", "password": "changeme111", "driver": "org.postgresql.Driver"}
 
 item_embeddings = spark.read.jdbc(url=jdbc_url, table="item_embeddings", properties=db_properties)
+
+# Parse embedding from string to array
+def parse_embedding(embedding_str):
+    return json.loads(embedding_str)
+parse_embedding_udf = udf(parse_embedding, ArrayType(FloatType()))
 item_embeddings = item_embeddings.withColumn("embedding", parse_embedding_udf(col("embedding")))
 
 
-# Function to handle user request and generate recommendations
-def recommend_books(request_data):
-    global item_embeddings
-    
-    user_id = request_data["user_id"]
-    user_ratings = request_data["ratings"]
+# Define recommendation logic
+def recommend_books(user_id, user_ratings, item_embeddings):
     user_ratings = {int(key): value for key, value in user_ratings.items()}
-    # Filter out rated items and prepare features
-    # rated_ids = [int(key) for key in user_ratings.keys()]
-    # print(rated_ids)
     rated_ids = list(user_ratings.keys())
+    
+    # Filter rated items
     rated_items = item_embeddings.filter(item_embeddings["id"].isin(rated_ids))
-
-    # Bind the user_ratings dictionary to the function using partial
-    get_user_rating_with_ratings = partial(get_user_rating, user_ratings=user_ratings)
-    # Register the UDF with FloatType as the return type
+    get_user_rating_with_ratings = partial(lambda id, user_ratings: user_ratings.get(id, 0.0), user_ratings=user_ratings)
     get_user_rating_udf = udf(lambda id: get_user_rating_with_ratings(id), FloatType())
     rated_items = rated_items.withColumn("label", get_user_rating_udf(col("id")))
-    #rated_items = rated_items.withColumn("label", get_user_rating_udf(user_ratings, col("id")))
-
-    # Vectorize the embeddings for model training
-    embedding_columns = [col("embedding")[i].alias(f"embedding_{i}") for i in range(100)]  # Assuming 100 dimensions in your vector
+    
+    # Prepare features
+    embedding_columns = [col("embedding")[i].alias(f"embedding_{i}") for i in range(100)]  # Assuming 100 dimensions
     rated_items_flattened = rated_items.select(*embedding_columns, "label")
     assembler = VectorAssembler(inputCols=[f"embedding_{i}" for i in range(100)], outputCol="features")
     rated_items_transformed = assembler.transform(rated_items_flattened)
-
+    
     # Train Ridge Regression model
     ridge_model = LinearRegression(featuresCol="features", labelCol="label", regParam=1.0, elasticNetParam=0.0)
     model = ridge_model.fit(rated_items_transformed)
     user_preferences = model.coefficients
+    
     # Calculate similarity scores
     user_pref_array = [lit(val) for val in user_preferences.toArray()]
     similarity_expr = reduce(
@@ -81,26 +65,59 @@ def recommend_books(request_data):
         range(len(user_preferences)), 
         lit(0.0)
     )
-    my_embedd = item_embeddings.withColumn("similarity", similarity_expr)
-
+    item_embeddings = item_embeddings.withColumn("similarity", similarity_expr)
+    
     # Get top recommendations
     recommendations = (
-        my_embedd
+        item_embeddings
         .filter(~col("id").isin(rated_ids))
         .orderBy(col("similarity").desc())
         .limit(5)
         .select("title")
     )
+    return [row["title"] for row in recommendations.collect()]
 
-    recommendations_list = [row["title"] for row in recommendations.collect()]
-    
-    # Send recommendations back to Kafka
-    response = {"user_id": user_id, "recommendations": recommendations_list}
-    #producer.send("recommendation_responses", value=response)
-    producer.send("recommendation_responses", json.dumps(response).encode('utf-8'))
-    producer.flush()
+# Read Kafka stream
+kafka_stream = spark.readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", kafka_bootstrap_servers) \
+    .option("subscribe", input_topic) \
+    .option("startingOffsets", "latest") \
+    .load()
+
+# Deserialize Kafka value to JSON
+kafka_stream = kafka_stream.selectExpr("CAST(value AS STRING) as message")
+parsed_stream = kafka_stream.withColumn("message", from_json(col("message"), kafka_message_schema)).select("message.*")
+
+# Process stream and generate recommendations
+def process_batch(batch_df, batch_id):
+    # Process each row in the batch
+    for row in batch_df.collect():
+        user_id = row["user_id"]
+        user_ratings = row["ratings"]
+        recommendations = recommend_books(user_id, user_ratings, item_embeddings)
+        
+        # Prepare response as a JSON string
+        response = json.dumps({
+            "user_id": user_id,
+            "recommendations": recommendations
+        })
+        
+        # Create a DataFrame with the required schema for Kafka
+        response_df = spark.createDataFrame(
+            [Row(value=response)]
+        )
+        
+        # Write to Kafka
+        response_df.write \
+            .format("kafka") \
+            .option("kafka.bootstrap.servers", kafka_bootstrap_servers) \
+            .option("topic", output_topic) \
+            .save()
 
 
-# Listen for requests and process them
-for message in consumer:
-    recommend_books(message.value)
+# Write output back to Kafka
+parsed_stream.writeStream \
+    .foreachBatch(process_batch) \
+    .start() \
+    .awaitTermination()

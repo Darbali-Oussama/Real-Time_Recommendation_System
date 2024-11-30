@@ -2,6 +2,11 @@ from fastapi import FastAPI
 from api import router as api_router
 from postgres.database import engine
 from models import Base
+from topic_creator import create_topics
+
+
+# Create kafka topics
+create_topics()
 
 # Create tables if they don't exist
 Base.metadata.create_all(bind=engine)
