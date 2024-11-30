@@ -1,0 +1,1 @@
+docker exec -it spark-master /bin/bash /opt/bitnami/spark/spark-job.sh

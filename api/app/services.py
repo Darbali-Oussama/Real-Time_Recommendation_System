@@ -39,11 +39,11 @@ def recommend_kafka_spark(db: Session, ratings: List[UserRating]):
         "ratings": {rating.book: rating.rating for rating in ratings}
     }
     send_request_to_kafka(request_data)
-
+    
 # Initialize Kafka consumer
 consumer = KafkaConsumer(
         'recommendation_responses',  # Replace with your Kafka topic name
-        bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'],  # Update with your Kafka server details
+        bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'],
         value_deserializer=lambda m: json.loads(m.decode('utf-8'))
     )
 

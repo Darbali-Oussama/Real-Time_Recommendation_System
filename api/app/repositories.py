@@ -109,7 +109,12 @@ def cache_embedding_in_redis(item_id, embedding):
 
 
 
-producer = KafkaProducer(bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'], value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+# producer = KafkaProducer(bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'], value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+
+producer = KafkaProducer(
+    bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'],
+    # value_serializer=lambda v: json.dumps(v, default=str).encode('utf-8')  # Use default=str to handle unexpected types
+)
 
 # def send_request_to_kafka(data: dict):
 #     producer.send("recommendation_requests", value=data.dict())

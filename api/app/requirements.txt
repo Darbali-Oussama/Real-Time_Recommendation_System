@@ -7,4 +7,4 @@ pgvector
 numpy
 redis
 elasticsearch
-kafka
+kafka-python

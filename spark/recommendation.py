@@ -18,12 +18,12 @@ spark = SparkSession.builder \
 # Kafka setup
 consumer = KafkaConsumer(
     'recommendation_requests',
-    bootstrap_servers='localhost:9092',
+    bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'],
     value_deserializer=lambda m: json.loads(m.decode('utf-8'))
 )
 producer = KafkaProducer(
-    bootstrap_servers='localhost:9092',
-    value_serializer=lambda v: json.dumps(v).encode('utf-8')
+    bootstrap_servers=['kafka1:19092', 'kafka2:19093', 'kafka3:19094'],
+    #value_serializer=lambda v: json.dumps(v).encode('utf-8')
 )
 
 # Convert embedding from string to array
@@ -50,10 +50,12 @@ def recommend_books(request_data):
     
     user_id = request_data["user_id"]
     user_ratings = request_data["ratings"]
-
+    user_ratings = {int(key): value for key, value in user_ratings.items()}
     # Filter out rated items and prepare features
-    rated_titles = list(user_ratings.keys())
-    rated_items = item_embeddings.filter(item_embeddings["id"].isin(rated_titles))
+    # rated_ids = [int(key) for key in user_ratings.keys()]
+    # print(rated_ids)
+    rated_ids = list(user_ratings.keys())
+    rated_items = item_embeddings.filter(item_embeddings["id"].isin(rated_ids))
 
     # Bind the user_ratings dictionary to the function using partial
     get_user_rating_with_ratings = partial(get_user_rating, user_ratings=user_ratings)
@@ -84,7 +86,7 @@ def recommend_books(request_data):
     # Get top recommendations
     recommendations = (
         my_embedd
-        .filter(~col("id").isin(rated_titles))
+        .filter(~col("id").isin(rated_ids))
         .orderBy(col("similarity").desc())
         .limit(5)
         .select("title")
@@ -94,7 +96,8 @@ def recommend_books(request_data):
     
     # Send recommendations back to Kafka
     response = {"user_id": user_id, "recommendations": recommendations_list}
-    producer.send("recommendation_responses", value=response)
+    #producer.send("recommendation_responses", value=response)
+    producer.send("recommendation_responses", json.dumps(response).encode('utf-8'))
     producer.flush()
 
 

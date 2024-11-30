@@ -31,12 +31,15 @@ services:
       - ./:/home
       - spark-data:/opt/bitnami/spark/data
       - ./recommendation.py:/opt/bitnami/spark/recommendation.py
+      - ./requirements.txt:/opt/bitnami/spark/requirements.txt
+      - ./spark-job.sh:/opt/bitnami/spark/spark-job.sh
       #- ./jars:/opt/bitnami/spark/jars # This mounts the jars folder containing downloaded .jar files
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
       interval: 5s
       timeout: 3s
       retries: 3
+    #command: sh -c "pip install --upgrade pip && pip install -r /opt/bitnami/spark/requirements.txt"
     networks:
       - kafka-network
       - my-network
