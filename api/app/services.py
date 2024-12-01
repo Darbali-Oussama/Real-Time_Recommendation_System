@@ -47,7 +47,7 @@ consumer = KafkaConsumer(
         value_deserializer=lambda m: json.loads(m.decode('utf-8'))
     )
 
-def get_recommendations(user_id: int):
+def get_recommendations_spark(user_id: int):
     for message in consumer:
         recommendation_data = message.value
         if recommendation_data.get("user_id") == user_id:

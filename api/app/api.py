@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from postgres.database import get_db
 from models import UserRating
-from services import get_recommendations_postgres, get_recommendations_elastic, recommend_kafka_spark, get_recommendations
+from services import get_recommendations_postgres, get_recommendations_elastic, recommend_kafka_spark, get_recommendations_spark
 
 
 router = APIRouter()
@@ -23,12 +23,7 @@ def recommend_books_elasticsearch(title: str):
     return recommendations
 
 @router.post("/recommend/spark")
-#async def recommend(ratings: List[UserRating], background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-# def recommend(ratings: dict):
-#     recommend_kafka_spark(ratings)
-#     return get_recommendations(ratings[0].user_id)
-
-def recommend(ratings: dict, db: Session = Depends(get_db)):
+def recommend_spark(ratings: dict, db: Session = Depends(get_db)):
     # Parse the incoming data to create UserRating instances
     parsed_ratings = [
         UserRating(user_id=ratings["user_id"], book=book, rating=rating)
@@ -39,7 +34,7 @@ def recommend(ratings: dict, db: Session = Depends(get_db)):
     recommend_kafka_spark(db, parsed_ratings)
     
     # Return recommendations for the user
-    return get_recommendations(ratings["user_id"])
+    return get_recommendations_spark(ratings["user_id"])
 
 
 # Example Postgres
