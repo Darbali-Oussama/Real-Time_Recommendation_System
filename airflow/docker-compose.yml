@@ -6,7 +6,7 @@ networks:
 
 services:
   postgres:
-    image: postgres:9.6
+    image: postgres:17-bullseye
     container_name: postgres
     environment:
       - POSTGRES_USER=airflow

@@ -1,3 +1,3 @@
 ortest/
 data/
-airflow/utils/credentials/
+airflow/dags/utils/credentials/
